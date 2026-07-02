@@ -10,12 +10,14 @@ Steps:
      ('proband', 'single_member_case'), and deduplicate on (CHROM, POS, REF, ALT).
   3. Filter to variant_kind == 'cnv' and deduplicate on
      (CHROM, POS, INFO_END, INFO_SVTYPE).
-
-Note: CHROM is stored in mixed naming conventions in the source (e.g. both '1'
-and 'chr1'); this script deduplicates on the raw CHROM string and does NOT
-normalize them, matching the agreed 'snv + patient filter' definition.
   4. Write unique_snvs_for_annotation.parquet and unique_cnvs.parquet.
   5. Append a run record to dedup_log.txt (input rows, output rows, timestamp).
+
+CHROM normalization: the source stores CHROM in mixed naming conventions (e.g.
+both '1' and 'chr1', 'chrM' and 'MT'). Before deduplication the 'chr' prefix is
+stripped and 'M' is mapped to 'MT', so a variant present under both conventions
+collapses to a single record. The normalized value is what is written out and
+what the dedup key is computed on.
 
 Deduplication uses DuckDB's DISTINCT ON so that one full row is kept per key,
 made deterministic by ordering on the key columns.
@@ -32,6 +34,11 @@ SNV_OUTPUT = "unique_snvs_for_annotation.parquet"
 CNV_OUTPUT = "unique_cnvs.parquet"
 LOG_FILE = "dedup_log.txt"
 
+# Normalize CHROM: strip 'chr' prefix, map 'M' -> 'MT'. Applied to both the
+# emitted column and the dedup key so mixed-convention rows collapse.
+NORM_CHROM = ("CASE WHEN regexp_replace(CHROM, '^chr', '') = 'M' THEN 'MT' "
+              "ELSE regexp_replace(CHROM, '^chr', '') END")
+
 SNV_KEYS = ["CHROM", "POS", "REF", "ALT"]
 SNV_COLS = ["CHROM", "POS", "REF", "ALT"]
 # SNVs are restricted to proband / single-member cases (original request spec).
@@ -44,14 +51,25 @@ CNV_COLS = ["CHROM", "POS", "INFO_END", "INFO_SVTYPE",
 CNV_WHERE_EXTRA = ""
 
 
+def _expr(name, alias):
+    """Map a column name to its SQL expression, normalizing CHROM.
+
+    alias=True yields the SELECT form (`... AS CHROM`); alias=False yields the
+    bare expression for use in DISTINCT ON / ORDER BY keys.
+    """
+    if name == "CHROM":
+        return f"{NORM_CHROM} AS CHROM" if alias else NORM_CHROM
+    return name
+
+
 def dedup(con, kind, keys, cols, output, where_extra=""):
     """Filter to `kind` (plus any `where_extra`), deduplicate on `keys`,
-    write `cols` to `output`.
+    write `cols` to `output`. CHROM is normalized (see NORM_CHROM).
 
     Returns (input_rows_after_filter, output_rows).
     """
-    key_list = ", ".join(keys)
-    col_list = ", ".join(cols)
+    key_list = ", ".join(_expr(k, alias=False) for k in keys)
+    col_list = ", ".join(_expr(c, alias=True) for c in cols)
     where = f"WHERE variant_kind = '{kind}' {where_extra}"
 
     con.sql(f"""
@@ -111,6 +129,8 @@ def main():
         f"pandas version    : {pd.__version__}",
         "",
         f"Total input rows  : {total_rows:,}",
+        "",
+        "CHROM normalized  : strip 'chr' prefix, map 'M' -> 'MT'",
         "",
         f"SNV filter        : variant_kind='snv' {SNV_WHERE_EXTRA}",
         f"SNV input rows    : {snv_in:,}  (after filter)",

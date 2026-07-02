@@ -1,5 +1,5 @@
 ============================================================
-Deduplication run: 2026-07-02T19:53:20.768013+02:00
+Deduplication run: 2026-07-02T21:26:15.881899+02:00
 ============================================================
 Input file        : dataset_clinical_curated.parquet
 duckdb version    : 1.5.2
@@ -7,9 +7,11 @@ pandas version    : 3.0.2
 
 Total input rows  : 7,699,766
 
+CHROM normalized  : strip 'chr' prefix, map 'M' -> 'MT'
+
 SNV filter        : variant_kind='snv' AND proband_status_curated IN ('proband', 'single_member_case')
 SNV input rows    : 6,501,853  (after filter)
-SNV output rows   : 430,822  -> unique_snvs_for_annotation.parquet
+SNV output rows   : 430,284  -> unique_snvs_for_annotation.parquet
 
 CNV input rows    : 26,652
 CNV output rows   : 7,101  -> unique_cnvs.parquet
