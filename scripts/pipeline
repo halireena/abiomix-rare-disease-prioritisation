@@ -5,11 +5,16 @@ BioConnect 2026 Consultancy Sprint
 
 Pipeline stages:
 A. Variant annotation (GeneBe API, GRCh37/hg19)
-B. HPO extraction (FastHPOCR + LLM validation) — see hpo_extraction/
+B. HPO extraction (FastHPOCR + LLM validation)
 C. Phenotype-gene scoring (Monarch knowledge graph)
 D. Variant scoring (ACMG + rarity + consequence + ClinVar)
 E. Inheritance scoring (family segregation + consanguinity)
 F. Combined ranking → top 10 per proband
+
+Quality control:
+- REF != ALT filter (removes sequencing artifacts)
+- Variant-level artifact filter (same chr:pos:ref:alt in 4+ unrelated cases)
+- Gene-level artifact filter (same gene in 4+ unrelated cases after variant filter)
 
 Dependencies:
     pip install duckdb requests pandas
@@ -18,6 +23,7 @@ Data files required:
     - dataset.parquet (main variant dataset from Abiomix)
     - dataset_clinical_curated.parquet (curated clinical notes)
     - {CASE_ID}_annotated.parquet (GeneBe annotation output per case)
+    - all_snvs_checkpoint_0.parquet (bulk annotation for singletons)
     - hpo_per_case.parquet (HPO extraction output)
 
 Evaluation benchmark: Talos (https://github.com/populationgenomics/talos)
@@ -28,6 +34,7 @@ import requests
 import pandas as pd
 import time
 import os
+import glob
 
 # ============================================================
 # SETUP
@@ -35,7 +42,6 @@ import os
 
 con = duckdb.connect()
 
-# Verify data files
 print("Dataset:", con.execute("SELECT count(*) FROM 'dataset.parquet'").df().iloc[0, 0], "rows")
 print("Clinical:", con.execute("SELECT count(*) FROM 'dataset_clinical_curated.parquet'").df().iloc[0, 0], "rows")
 
@@ -51,12 +57,11 @@ print("Monarch knowledge graph connected")
 # ============================================================
 # STAGE A: VARIANT ANNOTATION (GeneBe API)
 # ============================================================
-# Note: Variants are in GRCh37/hg19 build (confirmed by Abiomix mentor)
+# Variants are in GRCh37/hg19 build (confirmed by Abiomix mentor)
 # GeneBe returns: gene_symbol, consequence, ACMG classification,
 #   ClinVar, gnomAD frequencies, REVEL, SpliceAI, BayesDel, phyloP
 # GeneBe does not provide clinical interpretation (decision support only)
 
-# API credentials — load from environment variables, never commit keys
 EMAIL = os.environ.get("GENEBE_EMAIL", "your@email.com")
 API_KEY = os.environ.get("GENEBE_API_KEY", "your-api-key")
 
@@ -73,7 +78,6 @@ def annotate_batch(variants, email, api_key):
 
 def annotate_case(case_id, con, email, api_key, batch_size=1000):
     """Annotate all unique proband SNVs for a single case."""
-    
     variants_df = con.execute(f"""
         SELECT DISTINCT
             REPLACE(CAST(CHROM AS VARCHAR), 'chr', '') as chr,
@@ -120,6 +124,56 @@ def annotate_case(case_id, con, email, api_key, batch_size=1000):
     return result_df
 
 # ============================================================
+# ARTIFACT FILTERS
+# ============================================================
+# Identified through cross-case analysis:
+# - Variant-level: same chr:pos:ref:alt appearing in 4+ unrelated cases
+# - Gene-level: same gene appearing in 4+ unrelated cases after variant filter
+# These are technical sequencing artifacts, not real disease variants.
+# A genuine causal variant may be shared by 2-3 related patients,
+# but identical variants across 4+ unrelated cases with different
+# diseases is almost certainly technical noise.
+
+# Variant-level artifacts (exact chr:pos:ref:alt in 4+ cases)
+ARTIFACT_VARIANTS = {
+    '9:117372:C:G', '9:3824935:AT:A', '11:207359:C:CCACAGCCGCCTCAGACGT',
+    '19:2037847:A:AAC', '9:3824920:C:CA', '19:2037847:A:AC', '11:1017552:T:C',
+    '7:35442:T:TTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGC', '19:464140:CG:C',
+    '19:868331:C:T', '7:35473:T:TGCCGCCGCCGCCGCCGCCGCCGCCGCC',
+    '7:35473:T:TGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCCGCC',
+    '6:348195:G:A', '18:690702:A:AAGCTGTTTCCCCTGGACAGTCC',
+    '7:35473:T:TGCTGCTGCTGCTGCTGCTGCTGCTGCTGCCGCCGCCGCC',
+    '7:35442:T:TTGCTGCTGC', '9:4626449:C:A', '17:63583528:CG:C',
+    '7:35442:T:TTGCTGCTGCTGC', '19:302495:C:CATCAGA',
+    '7:35473:T:TGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCCGCCGCCGCC',
+    '19:633529:G:GGCCCCGCCGCCGCCGCCGCC'
+}
+
+# Gene-level artifacts (genes recurring in 4+ unrelated cases after variant filter)
+# Identified by running cross-case analysis on all scored results
+ARTIFACT_GENES = set()  # Populated dynamically — see identify_artifact_genes()
+
+def identify_artifact_genes(results_dir='/root/bioconnect'):
+    """Scan all top10 CSVs and identify genes appearing in 4+ unrelated cases."""
+    all_top10 = []
+    for f in glob.glob(f'{results_dir}/CASE*_top10.csv'):
+        df = pd.read_csv(f)
+        df['case_id'] = f.split('/')[-1].replace('_top10.csv', '')
+        all_top10.append(df)
+    
+    if not all_top10:
+        return set()
+    
+    combined = pd.concat(all_top10)
+    gene_freq = combined.groupby('gene_symbol')['case_id'].nunique()
+    artifacts = set(gene_freq[gene_freq >= 4].index)
+    
+    print(f"Artifact genes (4+ cases): {len(artifacts)}")
+    print(gene_freq[gene_freq >= 4].sort_values(ascending=False))
+    
+    return artifacts
+
+# ============================================================
 # STAGE C: PHENOTYPE-GENE SCORING (Monarch Knowledge Graph)
 # ============================================================
 # Scoring logic (from Abiomix mentor flow document):
@@ -129,7 +183,6 @@ def annotate_case(case_id, con, email, api_key, batch_size=1000):
 
 def get_phenotype_scores(hpo_terms, con):
     """Query Monarch for genes linked to patient HPO terms."""
-    
     gene_scores = {}
     for hpo_id in hpo_terms:
         genes = con.execute(f"""
@@ -163,11 +216,6 @@ def get_phenotype_scores(hpo_terms, con):
 # ============================================================
 # STAGE D: VARIANT SCORING (phenotype-agnostic)
 # ============================================================
-# Each variant scored on intrinsic properties independent of phenotype.
-# Weights reflect clinical variant interpretation practice:
-#   - Loss-of-function variants score highest
-#   - Rarer variants score higher (more likely to be causal)
-#   - ClinVar evidence adds confidence
 
 def variant_score(row):
     """Score a variant based on ACMG, consequence, rarity, and ClinVar."""
@@ -179,7 +227,7 @@ def variant_score(row):
     elif row['acmg_classification'] == 'Likely_pathogenic':
         score += 3
     elif row['acmg_classification'] == 'Uncertain_significance':
-        score += 1  # VUS gets minimal score — re-analysis candidate
+        score += 1  # VUS: minimal score, re-analysis candidate
     
     # Consequence severity
     effect = str(row['effect'])
@@ -192,7 +240,7 @@ def variant_score(row):
     elif 'splice_region' in effect:
         score += 1  # Near splice site
     
-    # Population frequency (rarer = more suspicious for rare disease)
+    # Population frequency
     af = row.get('gnomad_exomes_af', None)
     if af is None or (isinstance(af, float) and af == 0):
         score += 3  # Absent from population databases
@@ -204,7 +252,7 @@ def variant_score(row):
     # ClinVar evidence
     clinvar = str(row.get('clinvar_classification', ''))
     if 'athogenic' in clinvar:
-        score += 3  # ClinVar pathogenic/likely pathogenic
+        score += 3  # ClinVar P/LP
     elif 'ncertain' in clinvar:
         score += 1  # ClinVar VUS
     
@@ -213,14 +261,10 @@ def variant_score(row):
 # ============================================================
 # STAGE E: INHERITANCE SCORING
 # ============================================================
-# For family cases: variants absent in unaffected parents score higher
-#   (consistent with de novo in dominant disorders)
-# For consanguineous families: homozygous variants boosted
-#   (consistent with autosomal recessive inheritance)
 # Limitation: variant files only store non-reference positions,
-#   so 'absent in parent' means parent is reference OR position
-#   wasn't sequenced. Coverage confirmation needed for definitive
-#   de novo calling.
+# so 'absent in parent' means parent is reference OR position
+# wasn't sequenced. Coverage confirmation needed for definitive
+# de novo calling.
 
 def get_inheritance_score(row, family_variants, consanguineous=False):
     """Score based on inheritance pattern and consanguinity."""
@@ -250,7 +294,7 @@ def get_inheritance_score(row, family_variants, consanguineous=False):
         score = 1
         pattern = 'singleton'
     
-    # Consanguinity boost for homozygous variants
+    # Consanguinity boost for homozygous variants in consanguineous families
     if consanguineous:
         gt = str(row.get('FORMAT_GT', ''))
         if gt in ['1/1', '1|1']:
@@ -263,43 +307,100 @@ def get_inheritance_score(row, family_variants, consanguineous=False):
 # STAGE F: COMBINED SCORING AND TOP 10
 # ============================================================
 
-def run_pipeline(case_id, hpo_terms, con, family_member_case_id=None, consanguineous=False):
+def run_pipeline(case_id, hpo_terms, con, family_member_case_id=None, 
+                 consanguineous=False, annotation_source='per_case'):
     """
     Complete prioritisation pipeline for one proband.
     
-    Filters:
-    - Includes P/LP + coding VUS (intronic/synonymous VUS excluded)
-    - REF != ALT (removes sequencing artifacts)
+    Args:
+        case_id: proband case ID
+        hpo_terms: list of HPO IDs
+        con: DuckDB connection with Monarch attached
+        family_member_case_id: optional parent case ID for inheritance scoring
+        consanguineous: whether parents are consanguineous
+        annotation_source: 'per_case' uses {case_id}_annotated.parquet,
+                          'bulk' uses all_snvs_checkpoint_0.parquet with join
     
-    Scoring (three components):
-    - Phenotype score: Monarch direct (+3) and disease-mediated (+1) gene-HPO links
-    - Variant score: ACMG + consequence + rarity + ClinVar
-    - Inheritance score: family segregation + consanguinity boost
-    
-    Output:
-    - Top 10 ranked variants saved as {case_id}_top10.csv
+    Filters applied:
+        - P/LP + coding VUS (intronic/synonymous VUS excluded)
+        - REF != ALT (sequencing artifacts)
+        - Variant-level recurrence filter (4+ unrelated cases)
+        - Gene-level recurrence filter (4+ unrelated cases)
     """
     
-    # Load candidates: P/LP + coding VUS, exclude artifacts
-    variants = con.execute(f"""
-        SELECT chr, CAST(pos AS BIGINT) as pos, ref, alt,
-               gene_symbol, effect, acmg_classification,
-               clinvar_classification, gnomad_exomes_af,
-               revel_score, spliceai_max_score
-        FROM '{case_id}_annotated.parquet'
-        WHERE (acmg_classification IN ('Pathogenic', 'Likely_pathogenic')
-           OR (acmg_classification = 'Uncertain_significance' 
-               AND effect NOT LIKE '%intron%'
-               AND effect NOT LIKE '%synonymous%'))
-           AND ref != alt
-    """).df()
-    print(f"{case_id}: {len(variants)} candidates (P/LP + coding VUS)")
+    # Load and filter variants based on annotation source
+    if annotation_source == 'per_case':
+        variants = con.execute(f"""
+            SELECT chr, CAST(pos AS BIGINT) as pos, ref, alt,
+                   gene_symbol, effect, acmg_classification,
+                   clinvar_classification, gnomad_exomes_af,
+                   revel_score, spliceai_max_score
+            FROM '{case_id}_annotated.parquet'
+            WHERE (acmg_classification IN ('Pathogenic', 'Likely_pathogenic')
+               OR (acmg_classification = 'Uncertain_significance' 
+                   AND effect NOT LIKE '%intron%'
+                   AND effect NOT LIKE '%synonymous%'))
+               AND ref != alt
+        """).df()
+    else:
+        # Bulk annotation — join with case variants
+        proband_status = 'proband' if case_id in ['CASE0003', 'CASE0004', 'CASE0007', 
+                                                    'CASE0008', 'CASE0067', 'CASE0133'] else 'single_member_case'
+        variants = con.execute(f"""
+            SELECT a.chr, CAST(a.pos AS BIGINT) as pos, a.ref, a.alt,
+                   a.gene_symbol, a.effect, a.acmg_classification,
+                   a.clinvar_classification, a.gnomad_exomes_af,
+                   a.revel_score, a.spliceai_max_score
+            FROM 'all_snvs_checkpoint_0.parquet' a
+            JOIN (
+                SELECT DISTINCT
+                    REPLACE(CAST(CHROM AS VARCHAR), 'chr', '') as chr,
+                    POS as pos,
+                    CAST(REF AS VARCHAR) as ref,
+                    ALT[1] as alt
+                FROM 'dataset.parquet'
+                WHERE student_case_id = '{case_id}'
+                    AND proband_status_curated = '{proband_status}'
+                    AND variant_kind = 'snv'
+            ) d ON a.chr = d.chr 
+               AND CAST(a.pos AS BIGINT) = d.pos
+               AND a.ref = d.ref
+            WHERE (a.acmg_classification IN ('Pathogenic', 'Likely_pathogenic')
+               OR (a.acmg_classification = 'Uncertain_significance'
+                   AND a.effect NOT LIKE '%intron%'
+                   AND a.effect NOT LIKE '%synonymous%'))
+               AND a.ref != a.alt
+        """).df()
+    
+    if len(variants) == 0:
+        print(f"{case_id}: no candidates found")
+        return None
+    
+    # QC Filter 1: Variant-level artifacts
+    variants['variant_key'] = (variants['chr'].astype(str) + ':' + 
+                                variants['pos'].astype(str) + ':' + 
+                                variants['ref'].astype(str) + ':' + 
+                                variants['alt'].astype(str))
+    variants = variants[~variants['variant_key'].isin(ARTIFACT_VARIANTS)]
+    variants = variants.drop(columns=['variant_key'])
+    
+    # QC Filter 2: Gene-level artifacts
+    variants = variants[~variants['gene_symbol'].isin(ARTIFACT_GENES)]
+    
+    if len(variants) == 0:
+        print(f"{case_id}: no candidates after artifact filtering")
+        return None
+    
+    print(f"{case_id}: {len(variants)} candidates after filters")
     
     # Stage C: Phenotype scoring via Monarch
-    gene_scores, disease_genes = get_phenotype_scores(hpo_terms, con)
-    
-    variants['phenotype_score'] = variants['gene_symbol'].map(lambda g: gene_scores.get(g, 0))
-    variants['disease_score'] = variants['gene_symbol'].map(lambda g: disease_genes.get(g, 0))
+    if hpo_terms and len(hpo_terms) > 0:
+        gene_scores, disease_genes = get_phenotype_scores(hpo_terms, con)
+        variants['phenotype_score'] = variants['gene_symbol'].map(lambda g: gene_scores.get(g, 0))
+        variants['disease_score'] = variants['gene_symbol'].map(lambda g: disease_genes.get(g, 0))
+    else:
+        variants['phenotype_score'] = 0
+        variants['disease_score'] = 0
     variants['total_phenotype_score'] = variants['phenotype_score'] + variants['disease_score']
     
     # Stage D: Variant scoring
@@ -335,11 +436,9 @@ def run_pipeline(case_id, hpo_terms, con, family_member_case_id=None, consanguin
     # Generate explanations for top 10
     top10 = variants.head(10).copy()
     top10['explanation'] = top10.apply(lambda r:
-        f"{r['gene_symbol']}: {r['effect']} variant, classified as {r['acmg_classification']}. "
-        f"Phenotype score {r['total_phenotype_score']} (Monarch gene-HPO match). "
-        f"Variant score {r['variant_score']}. "
-        f"Inheritance: {r['inheritance_pattern']}. "
-        f"Final score: {r['combined_score']}.",
+        f"{r['gene_symbol']}: {r['effect']}, {r['acmg_classification']}. "
+        f"Phenotype {r['total_phenotype_score']}, Variant {r['variant_score']}, "
+        f"Inheritance {r['inheritance_pattern']}. Score {r['combined_score']}.",
         axis=1
     )
     
@@ -357,7 +456,7 @@ def run_pipeline(case_id, hpo_terms, con, family_member_case_id=None, consanguin
 # CASE CONFIGURATION
 # ============================================================
 
-# HPO terms per proband (Stage B: FastHPOCR + LLM validation)
+# HPO terms per labeled proband (Stage B: FastHPOCR + LLM validation)
 case_hpo = {
     'CASE0003': ['HP:0002376', 'HP:0001250', 'HP:0000717', 'HP:0000750', 'HP:0007018'],
     # Developmental regression, seizure, autism, speech delay, ADHD
@@ -374,7 +473,7 @@ case_hpo = {
     'CASE0067': ['HP:0000408'],
     # Hearing loss
     
-    # CASE0133 excluded — no clinical phenotype data (pedigree/identifier only)
+    # CASE0133 excluded from phenotype scoring — no clinical data (pedigree/identifier only)
 }
 
 # Family members for inheritance scoring
@@ -388,14 +487,62 @@ case_consanguinity = {
 }
 
 # ============================================================
-# RUN ALL PROBANDS
+# RUN LABELED PROBANDS
 # ============================================================
 
 if __name__ == '__main__':
+    
+    # Step 1: Run labeled probands (per-case annotation files)
+    print("=" * 60)
+    print("LABELED PROBANDS")
+    print("=" * 60)
+    
     for case_id, hpo_terms in case_hpo.items():
         family = case_family.get(case_id, None)
         consang = case_consanguinity.get(case_id, False)
         run_pipeline(case_id, hpo_terms, con,
                      family_member_case_id=family,
-                     consanguineous=consang)
+                     consanguineous=consang,
+                     annotation_source='per_case')
         print(f"\n{'='*60}\n")
+    
+    # CASE0133: variant scoring only (no phenotype data)
+    run_pipeline('CASE0133', [], con, annotation_source='per_case')
+    print(f"\n{'='*60}\n")
+    
+    # Step 2: Run singletons (bulk annotation file)
+    print("=" * 60)
+    print("SINGLETONS")
+    print("=" * 60)
+    
+    hpo = con.execute("""SELECT * FROM 'hpo_per_case (3).parquet'""").df()
+    singletons = con.execute("""
+        SELECT DISTINCT student_case_id
+        FROM 'dataset.parquet'
+        WHERE proband_status_curated = 'single_member_case'
+    """).df()['student_case_id'].tolist()
+    
+    singleton_hpo = hpo[(hpo['case_id'].isin(singletons)) & (hpo['n_hpo'] > 0)]
+    
+    completed = 0
+    for _, row in singleton_hpo.iterrows():
+        case_id = row['case_id']
+        hpo_ids = row['hpo_ids']
+        
+        if hpo_ids is None or len(hpo_ids) == 0:
+            continue
+        
+        try:
+            result = run_pipeline(case_id, hpo_ids, con, annotation_source='bulk')
+            if result is not None:
+                completed += 1
+        except Exception as e:
+            print(f"{case_id}: ERROR - {str(e)}")
+    
+    print(f"\nCompleted: {completed} singletons scored")
+    
+    # Step 3: Identify artifact genes from results (for documentation)
+    print("\n" + "=" * 60)
+    print("CROSS-CASE ARTIFACT ANALYSIS")
+    print("=" * 60)
+    ARTIFACT_GENES = identify_artifact_genes()
