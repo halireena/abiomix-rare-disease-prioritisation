@@ -132,6 +132,8 @@ The pipeline was evaluated on four independent axes.
 ---
 
 ## Repository Structure
+
+```
 .
 ├── acmg/                   Rule-based ACMG classification kernel (SQL manifests + Python: kernel,
 │                           case-level fold, ranking, family segregation, HPO, ingest, evidence,
@@ -146,7 +148,7 @@ The pipeline was evaluated on four independent axes.
 ├── notebooks/               Exploratory notebooks
 ├── outputs/                 Run logs (aggregate counts only — no patient-level data)
 └── README.md
-
+```
 Real patient-level data, VCFs, reference genomes, and per-case results are intentionally **not** committed to this repository (see Ethical and Data-Safety Statement). The pipeline is fully open; the data it runs on stays local.
 
 ---
