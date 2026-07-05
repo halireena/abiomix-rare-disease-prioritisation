@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bioconnect-sprint-py"
+version = "0.1.0"
+description = "Transparent, offline ACMG variant classifier + family/ingest abstractions for the BioConnect 2026 sprint."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "GPL-2.0-or-later" }
+dependencies = ["duckdb>=1.0", "pandas>=2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+# On-device splicing lane (OpenSpliceAI, SpliceAI-equivalent) — HEAVY (pulls PyTorch ~2GB). Opt-in only:
+#   pip install -e '.[splice]'   (or scripts/setup_openspliceai.sh, which also fetches the OSAI_MANE models).
+# Deliberately OUT of core `dependencies` so the base student install stays lean and the lock stays torch-free;
+# acmg.annotate.spliceai_local imports it lazily and errors with a pointer if the extra is absent.
+splice = ["openspliceai==0.0.7", "torch==2.12.1", "pysam==0.23.3", "pyfaidx==0.9.0.4"]
+
+[tool.setuptools]
+packages = ["acmg"]
+
+[tool.setuptools.package-data]
+acmg = ["manifests/*.sql"]

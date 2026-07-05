@@ -1,0 +1,6 @@
+# Core (tested: duckdb 1.5.2, pandas 3.0.2, FastHPOCR 0.1.4, requests 2.32.5)
+duckdb>=1.5,<2
+pandas>=2.0
+FastHPOCR>=0.1.4          # HPO concept recognition (Stage B), Python-native
+requests>=2.28            # Ensembl VEP-REST + evidence APIs + downloads
+# optional: pytest (tests); pyliftover only if you want Python liftover (duckhts does it in SQL)

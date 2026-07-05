@@ -1,0 +1,7 @@
+sample_id	fam	status	rel	chr	position	ref_allele	alt_allele	genotype	geno_qual	depth
+S1	FX	proband	proband_child	chr1	100	A	G	0/1	40	30
+S2	FX	non_proband	mother	chr1	100	A	G	0/0	35	28
+S3	FX	non_proband	father	chr1	100	A	G	0/0	38	25
+S1	FX	proband	proband_child	chr1	200	C	T	0/1	45	33
+S2	FX	non_proband	mother	chr1	200	C	T	0/1	40	30
+S3	FX	non_proband	father	chr1	200	C	T	0/0	42	29
