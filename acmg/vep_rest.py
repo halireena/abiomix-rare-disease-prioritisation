@@ -78,6 +78,20 @@ def _consequence(rec: dict) -> str | None:
     return None
 
 
+def _gnomad_af(rec: dict, alt: str) -> float | None:
+    """Max gnomAD exome/genome AF for `alt` across all colocated variants.
+
+    The VEP REST API nests frequencies per allele:
+    colocated_variants[i]["frequencies"][alt] = {"gnomade": 1e-4, "gnomadg": 2e-4, ...}.
+    Top-level keys (VCF/CSQ-style names) are kept as a fallback."""
+    afs = []
+    for cv in rec.get("colocated_variants") or []:
+        per_allele = (cv.get("frequencies") or {}).get(alt) or {}
+        afs += [per_allele[k] for k in ("gnomade", "gnomadg") if per_allele.get(k) is not None]
+        afs += [cv[k] for k in ("gnomADe_AF", "gnomADg_AF", "gnomad_exomes_af") if cv.get(k) is not None]
+    return max(map(float, afs)) if afs else None
+
+
 def to_annotations(records: list[dict]) -> "pd.DataFrame":
     """VEP REST JSON -> the kernel's `annotations` columns + protein_pos/alt_aa1 (for ClinVar PS1/PM5).
     `filtering_af` = the max of the gnomAD exome/genome AFs VEP returns (max-population is refined via the
@@ -88,11 +102,7 @@ def to_annotations(records: list[dict]) -> "pd.DataFrame":
         alleles = rec.get("input", "").split()
         ref, alt = (alleles[3], alleles[4]) if len(alleles) >= 5 else ("N", "N")
         tc = _pick(rec) or {}
-        af = None
-        for k in ("gnomADe_AF", "gnomADg_AF", "gnomad_exomes_af", "af"):
-            v = (rec.get("colocated_variants") or [{}])[0].get(k) if rec.get("colocated_variants") else None
-            if v is not None:
-                af = float(v); break
+        af = _gnomad_af(rec, alt)
         aa = (tc.get("amino_acids") or "/").split("/")
         rows.append({
             "variant_key": f"{rec.get('seq_region_name')}-{rec.get('start')}-{ref}-{alt}",
