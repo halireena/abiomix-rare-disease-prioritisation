@@ -43,7 +43,9 @@ else echo "  MISS revel_grch37.parquet — derive from upstream zip (one-off):"
 echo "== HPO (phenotype ranking; FastHPOCR index) =="
 get "https://purl.obolibrary.org/obo/hp.obo" hp.obo "HPO ontology"
 if [[ -s "$CACHE/hp.index" ]]; then echo "  ok   hp.index  ($(du -h "$CACHE/hp.index"|cut -f1))  [FastHPOCR index]"
-else echo "  BUILD hp.index <- python $CACHE/_build_index.py (FastHPOCR over hp.obo)"; python "$CACHE/_build_index.py" || true; fi
+else echo "  BUILD hp.index <- python scripts/build_hpo_index.py (FastHPOCR over hp.obo)"
+     python scripts/build_hpo_index.py --obo "$CACHE/hp.obo" --out-dir "$CACHE" \
+       || echo "  WARN hp.index not built (pip install FastHPOCR pronto, then re-run); HPO extraction needs it"; fi
 
 echo "== ClinGen (gene_curation: PVS1 gate, validity cap, MOI; rolling — record file-created date) =="
 # search.clinicalgenome.org gene-validity + gene-dosage downloads, via acmg.clingen (handles CSV headers)
