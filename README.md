@@ -137,15 +137,47 @@ The pipeline was evaluated on four independent axes.
 
 ```
 .
-├── pipeline/               End-to-end pipeline scripts (ingest, HPO, annotate, ACMG, rerank, GO, literature)
-├── acmg/                   Rule-based ACMG classification kernel and concordance analysis
-├── segregation/            Liftover and family-segregation analysis
-├── exomiser/               Exomiser configuration, VCFs, and result tables
-├── ranking/                Case-level prioritisation output
-├── notebooks/              Exploratory and annotation notebooks
-├── results/                Per-case top-candidate tables and evidence summaries
+├── acmg/                   Python package: SQL ACMG kernel (acmg/manifests/*.sql), ingest, family/segregation,
+│                           HPO extraction, ClinGen/ClinVar/gnomAD evidence, NMD, CNV, reranking, GO decision,
+│                           and the gated literature/agent arm
+├── scripts/                Cohort-scale and per-proband drivers (prepare_bundle, annotate_cohort, run_bundle,
+│                           run_proband, run_all_probands, validate_kernel, ...) and data/tool setup scripts
+├── examples/               demo.py (offline), run_case.py and literature_arm.py (need network / local data)
+├── tests/                  pytest suite with small synthetic fixtures (no network, no large data)
+├── docs/                   Reference-data versions and cohort-scale notes
+├── data/, outputs/, notebooks/   Local working directories (large data is git-ignored)
+├── pyproject.toml          Package metadata and optional extras (dev, splice)
+├── requirements.txt / requirements.lock   Core dependencies (lock generated with uv)
 └── README.md
 ```
+
+---
+
+## Installation and Quick Start
+
+Requires Python 3.9+.
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e '.[dev]'           # core (duckdb, pandas, requests) + test tooling
+pip install FastHPOCR             # optional: HPO concept recognition (Stage 2)
+# pip install -e '.[splice]'      # optional, heavy (PyTorch): on-device OpenSpliceAI lane
+
+python examples/demo.py           # offline: synthetic VEP-shaped table -> ACMG classes with fired criteria
+```
+
+Reference data (ClinVar, ClinGen, gnomAD constraint, GENCODE, ...) is fetched separately with
+`scripts/fetch_data.sh`; record the versions you use in `docs/data_versions.md`.
+
+## Running the Tests
+
+```bash
+python -m pytest -q    # offline; ruff check . for linting
+```
+
+Tests that need optional resources skip with a reason instead of failing: the VCF-ingest tests need the
+`duckhts` DuckDB community extension (downloaded on first use), and the HPO-mode tests need a built FastHPOCR
+`hp.index`. CI (`.github/workflows/ci.yml`) runs ruff, pytest and the offline demo on every push and pull request.
 
 ---
 
