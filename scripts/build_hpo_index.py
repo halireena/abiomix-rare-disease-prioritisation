@@ -5,7 +5,7 @@ derived data (git-ignored), so build it once after downloading hp.obo. Needs net
 
     curl -fL -o .cache/hp.obo https://purl.obolibrary.org/obo/hp.obo
     pip install FastHPOCR pronto          # pronto: FastHPOCR's indexer needs it but does not declare it
-    python scripts/build_hpo_index.py     # -> .cache/hp.index (takes several minutes)
+    python scripts/build_hpo_index.py     # -> .cache/hp.index (~140 MB; about 15 minutes on one CPU)
 
 Record the HPO release (the `data-version:` line at the top of hp.obo) in docs/data_versions.md.
 """

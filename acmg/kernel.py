@@ -50,7 +50,7 @@ def classify(
                  in an uncurated gene gets no PVS1) and the gene-disease validity cap is a no-op —
                  fail-safe, not silently wrong.
 
-    Returns columns: variant_key, gene, variant_kind, total_points, criteria, acmg_class.
+    Returns columns: variant_key, gene, variant_kind, total_points, criteria, acmg_class, pm1_hotspot.
     """
     con = con or duckdb.connect()
     ann = annotations.copy()
