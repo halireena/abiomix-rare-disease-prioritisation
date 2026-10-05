@@ -45,8 +45,14 @@ UNION ALL
 -- Splicing is a SEPARATE concept: its own single calibrated predictor (SpliceAI; ClinGen SVI Splicing, Walker 2023).
 -- PP3 if SpliceAI >= 0.2, but ONLY for splice-relevant consequences — a missense already gets its ONE computational
 -- PP3 from REVEL, so SpliceAI must not stack a second PP3 on it (concept-cap; one calibrated tool per concept).
-SELECT variant_key,'PP3','P',1,'SpliceAI '||spliceai||' >= 0.2 (splice concept)'
-FROM annotations_spec WHERE consequence IN ('splice_region','splice_donor','splice_acceptor','intron','synonymous') AND spliceai IS NOT NULL AND spliceai >= 0.2
+-- Canonical +/-1,2 splice variants that take PVS1 below get NO SpliceAI PP3 (Abou Tayoun 2018: PP3 is not applied
+-- with PVS1 for canonical splice variants — the predicted splice defect IS the PVS1 evidence). The exclusion mirrors
+-- the PVS1 entry gate exactly, so PP3 still fires when PVS1 abstains.
+SELECT s.variant_key,'PP3','P',1,'SpliceAI '||s.spliceai||' >= 0.2 (splice concept)'
+FROM annotations_spec s WHERE s.consequence IN ('splice_region','splice_donor','splice_acceptor','intron','synonymous') AND s.spliceai IS NOT NULL AND s.spliceai >= 0.2
+  AND NOT (s.consequence IN ('splice_donor','splice_acceptor') AND s.nmd_escaping IN (0, 1)
+           AND (EXISTS (SELECT 1 FROM gene_curation gc WHERE gc.gene = s.gene AND gc.lof_mechanism)
+                OR (s.loeuf < 0.35 AND (SELECT enabled FROM pvs1_constraint_config))))
 UNION ALL
 -- BP7: synonymous with SpliceAI < 0.2
 SELECT variant_key,'BP7','B',-1,'synonymous, SpliceAI '||spliceai||' < 0.2' FROM annotations_spec WHERE consequence='synonymous' AND spliceai IS NOT NULL AND spliceai < 0.2

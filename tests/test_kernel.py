@@ -104,3 +104,23 @@ def test_cadd_supporting_fallback_only_on_the_uncovered_tail():
     for vk in ("3-1-C-T", "4-1-C-T", "5-1-C-T"):                         # gated / excluded / indeterminate
         crit = on.loc[vk, "criteria"] or ""
         assert "PP3" not in crit and "BP4" not in crit
+
+
+def test_canonical_splice_pvs1_does_not_also_get_spliceai_pp3():
+    """ClinGen SVI PVS1 tree (Abou Tayoun 2018): PP3 must not be applied together with PVS1 for a canonical
+    +/-1,2 splice variant — the predicted splice defect IS the PVS1 evidence, so counting SpliceAI again
+    double-counts it."""
+    r = _classify([dict(variant_key="1-6-G-A", gene="LOFGENE", consequence="splice_donor",
+                        variant_kind="snv", filtering_af=1e-6, nmd_escaping=0, spliceai=0.95)],
+                  gene_curation=GENE_CURATION)
+    crit = r["1-6-G-A"].criteria
+    assert "PVS1_VeryStrong" in crit
+    assert "PP3" not in crit.replace("PP3_", "")  # no SpliceAI PP3 on top of PVS1
+
+
+def test_canonical_splice_without_pvs1_keeps_spliceai_pp3():
+    """When PVS1 abstains (LoF not an established mechanism), SpliceAI PP3 is the only splice evidence and stays."""
+    r = _classify([dict(variant_key="1-7-G-A", gene="RANDOM", consequence="splice_donor",
+                        variant_kind="snv", filtering_af=1e-6, nmd_escaping=0, spliceai=0.95)])
+    crit = r["1-7-G-A"].criteria
+    assert "PVS1" not in crit and "PP3" in crit
