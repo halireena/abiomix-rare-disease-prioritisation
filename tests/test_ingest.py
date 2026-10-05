@@ -1,6 +1,7 @@
 """Format-agnostic ingest tests: VCF (duckhts), tidy TSV (custom mapping), Excel, and PED pedigree — each
 producing the SAME canonical `sample_call`, verified end-to-end through acmg.family. Run:
 `PYTHONPATH=. python3 tests/test_ingest.py`."""
+import functools
 import os
 import duckdb
 from acmg import ingest
@@ -10,12 +11,31 @@ from acmg import family
 FIX = os.path.join(os.path.dirname(__file__), "fixtures")
 
 
+@functools.lru_cache(maxsize=None)
+def _duckhts_error():
+    """VCF ingest needs the duckhts community extension, which duckdb downloads on first use. Return the
+    install/load error (or None) so offline/firewalled runs skip the VCF tests instead of failing."""
+    try:
+        duckdb.connect().execute("INSTALL duckhts FROM community; LOAD duckhts;")
+    except duckdb.Error as e:
+        return str(e).splitlines()[0]
+    return None
+
+
+def _need_duckhts():
+    err = _duckhts_error()
+    if err:
+        import pytest
+        pytest.skip(f"duckhts extension unavailable (offline?): {err}")
+
+
 def _assert_canonical(con):
     cols = [c[0] for c in con.execute("DESCRIBE sample_call").fetchall()]
     assert cols == CANONICAL, f"schema drift: {cols}"
 
 
 def test_vcf_ingest_unpivots_per_sample():
+    _need_duckhts()
     con = duckdb.connect()
     ingest.ingest_variants(con, os.path.join(FIX, "trio.vcf"))
     _assert_canonical(con)
@@ -28,6 +48,7 @@ def test_vcf_ingest_unpivots_per_sample():
 
 
 def test_vcf_plus_ped_de_novo():
+    _need_duckhts()
     con = duckdb.connect()
     ingest.ingest_variants(con, os.path.join(FIX, "trio.vcf"))
     ingest.ingest_pedigree(con, os.path.join(FIX, "trio.ped"))
@@ -60,6 +81,8 @@ def test_tsv_custom_column_mapping():
 
 def test_excel_ingest_matches_tsv():
     import pandas as pd
+    import pytest
+    pytest.importorskip("openpyxl")  # pandas' Excel writer/reader (pip install -e '.[dev]')
     con = duckdb.connect()
     df = pd.read_csv(os.path.join(FIX, "tidy.tsv"), sep="\t")
     xlsx = os.path.join(FIX, "_tidy.xlsx")
@@ -77,6 +100,7 @@ def test_excel_ingest_matches_tsv():
 
 
 def test_snv_only_filter_keeps_snvs():
+    _need_duckhts()
     con = duckdb.connect()
     ingest.ingest_variants(con, os.path.join(FIX, "trio.vcf"), snv_only=False)
     n_all = con.execute("SELECT count(*) FROM sample_call").fetchone()[0]

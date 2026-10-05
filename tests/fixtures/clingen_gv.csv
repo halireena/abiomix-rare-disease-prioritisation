@@ -1,0 +1,8 @@
+"CLINGEN GENE DISEASE VALIDITY CURATIONS"
+"FILE CREATED: 2026-01-01 (synthetic test fixture)"
+"WEBPAGE: https://search.clinicalgenome.org/kb/gene-validity"
+"++++++++++","++++++++++","++++++++++","++++++++++","++++++++++","++++++++++","++++++++++","++++++++++","++++++++++","++++++++++"
+"GENE SYMBOL","GENE ID (HGNC)","DISEASE LABEL","DISEASE ID (MONDO)","MOI","SOP","CLASSIFICATION","ONLINE REPORT","CLASSIFICATION DATE","GCEP"
+"+++++++++++","++++++++++++++","+++++++++++++","++++++++++++++++++","+++++++++","+++++++++","++++++++++++++","+++++++++++++","+++++++++++++++++++","+++++++++++++++++++"
+"TP53","HGNC:11998","Li-Fraumeni syndrome","MONDO:0018875","AD","SOP7","Definitive","https://example.org/tp53","2020-01-01T00:00:00.000Z","Synthetic GCEP"
+"XYZAR","HGNC:00000","synthetic recessive disorder","MONDO:0000000","AR","SOP8","Moderate","https://example.org/xyzar","2021-01-01T00:00:00.000Z","Synthetic GCEP"

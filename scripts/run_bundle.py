@@ -80,9 +80,9 @@ def sweep_multiplex(con: duckdb.DuckDBPyConnection, *, rare: float = RARE_COHORT
     exact `clinvar` table (load_clinvar without cache_parquet). `cohort_freq` is a parquet of chr/pos/ref/alt/
     cohort_freq (injectable for testing / another cohort)."""
     _clinvar_pathogenic_view(con)
-    cand = family.affected_shared_candidates(con)
+    cand = family.affected_shared_candidates(con)  # noqa: F841 — read by DuckDB's replacement scan below
     con.execute("CREATE OR REPLACE TABLE _shared AS SELECT * FROM cand")
-    con.execute(f"""
+    con.execute("""
         CREATE OR REPLACE TABLE _shared_keyed AS
         SELECT s.*, split_part(s.variant_key,'-',3) AS ref, split_part(s.variant_key,'-',4) AS alt
         FROM _shared s

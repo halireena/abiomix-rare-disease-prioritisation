@@ -22,7 +22,6 @@ See docs/scale.md for measured timings.
 """
 from __future__ import annotations
 import argparse
-import shutil
 import time
 from pathlib import Path
 
@@ -499,8 +498,8 @@ def main() -> None:
     t = _T()
 
     print("== cohort ==")
-    n = t.step("build cohort (dedup to distinct loci)",
-               lambda: f"distinct_loci={build_cohort(con, args.parquet)}")
+    t.step("build cohort (dedup to distinct loci)",
+           lambda: f"distinct_loci={build_cohort(con, args.parquet)}")
     n_loci = con.execute("SELECT count(*) FROM cohort").fetchone()[0]
 
     print("== load LOCAL reference tables (owned, offline, no quota) ==")

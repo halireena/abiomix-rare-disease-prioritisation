@@ -5,9 +5,16 @@ This is what should happen to the 'mixed / adjudicate' candidates from run_case.
 evidence and proposes; it never moves the class on its own.
 
 Run:  python examples/literature_arm.py
+
+Needs network (Europe PMC, MARRVEL, DECIPHER, LitVar2, Ensembl REST) and the `pi` CLI on PATH with an LLM
+provider configured; it checks for `pi` first and exits with a hint if it is missing.
 """
 import json
 from acmg import evidence, agent, pi
+
+if not pi.available():  # checked up front so a missing CLI does not cost a round of network calls first
+    raise SystemExit("pi CLI not found on PATH. This example needs it for step 2/3; to use another model, pass any "
+                     "prompt->text callable as agent.propose(..., llm=...). Fully offline demo: python examples/demo.py")
 
 # a 'mixed' candidate from CASE0003 (phenotype-matched VUS). RSID optional (unlocks Ensembl Variation + LitVar2).
 CANDIDATE = {"variant_key": "20-49513169-G-T", "gene": "ADNP", "acmg_class": "VUS"}
@@ -30,9 +37,7 @@ def render(ctx: dict) -> str:
     )
 
 
-print(f"\n[2/3] pi proposes (recorded + gated) ...")
-if not pi.available():
-    raise SystemExit("pi CLI not found; wire any prompt->text callable into agent.propose instead")
+print("\n[2/3] pi proposes (recorded + gated) ...")
 # full persistence: every run (context, prompt, model, response, digest) + the decision are durably logged
 ledger = agent.AgentLedger("agent_runs.jsonl")
 proposal = agent.propose(context, llm=pi.as_llm(provider="openai-codex", model="gpt-5.3-codex-spark", timeout=180),
@@ -40,7 +45,8 @@ proposal = agent.propose(context, llm=pi.as_llm(provider="openai-codex", model="
 print(f"      status: {proposal['status']}   digest: {proposal['digest'][:23]}…")
 print("      model proposal:\n" + "\n".join("        " + l for l in proposal["response"].splitlines()[:12]))
 
-print(f"\n[3/3] a curator approves this exact digest (a separate, attested decision) ...")
+print("\n[3/3] a curator approves this exact digest (a separate, attested decision) ...")
+# NB: the approval is scripted here to show the mechanics; in real use a person reads the proposal first.
 approved = agent.approve(proposal, approver="curator", ledger=ledger)
 print(f"      status: {approved['status']}  approved_by: {approved['approved_by']}  "
       f"digest-bound: {approved['approved_digest'] == proposal['digest']}")

@@ -12,7 +12,7 @@ de-identified text). Do NOT source `dataset_clinical_curated.parquet` — that c
   snv.parquet       canonical SNV/indel calls (acmg.ingest schema: case/member/variant_key/gt/gq/dp/...)
   cnv.parquet       canonical CNV calls: case/member/chrom/start/end/svtype/cn
 
-Usage:  python scripts/prepare_bundle.py --source /root/bioconnect/dataset_clinical_curated.parquet --out prepared
+Usage:  python scripts/prepare_bundle.py --source /root/bioconnect/dataset.parquet --out prepared
 """
 from __future__ import annotations
 import argparse

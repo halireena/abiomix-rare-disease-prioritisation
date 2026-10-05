@@ -8,7 +8,11 @@ Source (download once): gnomAD v2.1.1 gene-level LoF metrics —
 (bgzip is gzip-compatible; DuckDB reads it directly.)
 """
 from __future__ import annotations
+from typing import TYPE_CHECKING
 import duckdb
+
+if TYPE_CHECKING:  # annotations only; pandas is imported lazily where it is used
+    import pandas as pd
 
 
 def load_constraint(con: duckdb.DuckDBPyConnection, by_gene_gz: str) -> None:

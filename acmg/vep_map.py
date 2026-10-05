@@ -76,6 +76,14 @@ def vep_to_annotations(vep_df: pd.DataFrame, cols: dict | None = None) -> pd.Dat
       - nmd_escaping: 0/1 from the NMD rule (last exon / <50nt from last exon-exon junction) -> PVS1 strength
     """
     c = {**DEFAULT_VEP_COLS, **(cols or {})}
+    # The variant key needs all four coordinates; without them the row loop dies with an opaque int(None) error.
+    missing = [c[k] for k in ("chrom", "pos", "ref", "alt") if c[k] not in vep_df.columns]
+    if len(vep_df) and missing:
+        raise ValueError(
+            f"vep_to_annotations: input has no column(s) {missing} (needed to build the variant key). "
+            f"Columns present: {list(vep_df.columns)}. Rename them, or map yours with "
+            f"cols={{'chrom': ..., 'pos': ..., 'ref': ..., 'alt': ...}} (defaults: acmg.vep_map.DEFAULT_VEP_COLS)."
+        )
     g = lambda row, key: row[c[key]] if c[key] in row else None
     out = []
     for _, row in vep_df.iterrows():

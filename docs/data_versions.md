@@ -39,7 +39,7 @@ the single home for every download that used to be ad hoc, and it writes `.cache
 | GENCODE | **v46lift37** (basic, MANE-tagged) | NMD / transcript (PVS1) | MANE on GRCh37 via lift37 |
 | REVEL | **v1.3** | PP3/BP4 (missense) | local `revel_grch37.parquet` (77.9M loci) |
 | CADD | **v1.7** GRCh37, exon±500bp SLICE | supplementary non-missense score (optional) | **not required** — PP3/BP4 come from REVEL (missense) + SpliceAI (splice). `scripts/build_cadd_slice.sh` range-reads only exon±500bp off the 79GB whole-genome file → `cadd_exome_slice.parquet`. Indels need the gnomAD-v4-indel-liftover set (not enumerable) |
-| HPO (`hp.obo` + `hp.index`) | download **~2026-07** | FastHPOCR phenotype index | `hp.obo` from OBO PURL; `hp.index` built by `.cache/_build_index.py`. Record the HPO release |
+| HPO (`hp.obo` + `hp.index`) | download **~2026-07** | FastHPOCR phenotype index | `hp.obo` from OBO PURL; `hp.index` built by `scripts/build_hpo_index.py` (needs `pip install FastHPOCR pronto`). Record the HPO release |
 | Monarch KG | `monarch-kg/latest` | phenotype→gene, cross-species | **rolling** — snapshot for a reproducible run |
 | ClinGen Gene-Disease Validity | download **2026-07-03** | `gene_curation` (gene×disease MOI + validity) | rolling; record FILE CREATED date. `acmg.clingen` |
 | ClinGen Dosage Sensitivity | download **2026-07-03** | `hi_score` / LoF mechanism (PVS1) | rolling; record FILE CREATED date. `acmg.clingen` |

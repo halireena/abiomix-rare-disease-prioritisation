@@ -1,6 +1,8 @@
 """End-to-end demo that runs WITHOUT VEP installed: a synthetic VEP-shaped table -> ACMG classes.
 
 Replace `vep_df` with a real VEP GRCh37 output (see README) and it works unchanged.
+The four rows are made up to exercise the rules; their coordinates are illustrative, not real loci.
+Research use only: the output is an automated evidence summary, not a clinical classification.
 """
 import pandas as pd
 from acmg import vep_to_annotations, classify
@@ -40,3 +42,6 @@ gene_curation = pd.DataFrame([
 result = classify(annotations, gene_curation=gene_curation)
 print("ACMG classification:")
 print(result.to_string())
+
+print("\nHow to read this: `criteria` lists the ACMG/AMP evidence codes that fired (glossary in README.md);")
+print("`total_points` is their Tavtigian sum (P >= 10, LP 6..9, VUS 0..5, LB -1..-6, B <= -7; BA1 alone -> Benign).")

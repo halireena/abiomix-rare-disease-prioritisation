@@ -20,7 +20,11 @@ backmap. (A plain Ensembl-87 GRCh37 GTF predates MANE and has no tags.) With lif
 returns the true clinical transcript — e.g. BRCA1 -> ENST00000357654 (MANE Select).
 """
 from __future__ import annotations
+from typing import TYPE_CHECKING
 import duckdb
+
+if TYPE_CHECKING:  # annotations only; pandas is imported lazily where it is used
+    import pandas as pd
 
 _ATTR = lambda key: f"regexp_extract(attributes, '{key} \"([^\"]+)\"', 1)"
 
@@ -46,7 +50,7 @@ def load_exons(con: duckdb.DuckDBPyConnection, gtf: str) -> None:
 
 def select_transcript(con: duckdb.DuckDBPyConnection, gene: str) -> str | None:
     """MANE Select -> MANE Plus Clinical -> APPRIS principal / basic -> most exons. Best-effort on GRCh37."""
-    row = con.execute(f"""
+    row = con.execute("""
         SELECT transcript_id FROM exon WHERE gene = ?
         GROUP BY transcript_id, mane_select, mane_plus_clinical, appris_principal, basic
         ORDER BY bool_or(mane_select) DESC, bool_or(mane_plus_clinical) DESC,

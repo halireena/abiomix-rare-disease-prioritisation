@@ -8,6 +8,10 @@ Composition of shipped pieces (acmg.proband.run_proband). Needs: the SNV datalak
 corrected}.parquet). ClinGen gene_curation is fetched for MOI + HI/TS.
 
 Run:  PYTHONPATH=. python3 scripts/run_proband.py CASE0007 [--out CASE0007_top10.csv]
+
+Privacy defaults (acmg.privacy): clinical text is read only from de-identified files, and HPO extraction is
+`--hpo-mode tool_only` (local FastHPOCR). The LLM HPO modes send the clinical-indication text to an LLM provider
+via the `pi` CLI and need --allow-external-llm.
 """
 from __future__ import annotations
 import argparse
@@ -17,6 +21,7 @@ import duckdb
 import pandas as pd
 from acmg.proband import run_proband
 from acmg.case import _FAMILY_STRUCTURES
+from acmg import privacy
 
 PREP = "/root/bioconnect/prepared"
 
@@ -67,19 +72,20 @@ def _structure(ped: pd.DataFrame, case_id: str) -> str:
 
 def _clinical_text(con, case_id: str) -> str:
     src = "/root/bioconnect/dataset_clinical_curated.deid.parquet"
-    src = src if os.path.exists(src) else "/root/bioconnect/dataset.parquet"
+    src = src if os.path.exists(src) else privacy.DEID_BUNDLE
+    privacy.check_bundle(src, allow_pii_input=False)       # de-identified sources only
     row = con.execute(f"SELECT DISTINCT clinical_indication_text FROM read_parquet('{src}') WHERE student_case_id = ?",
                       [case_id]).fetchone()
     return row[0] if row and row[0] else ""
 
 
-def _hpo(con, case_id: str, cache: str) -> list:
+def _hpo(con, case_id: str, cache: str, hpo_mode: str = privacy.OFFLINE_HPO_MODE) -> list:
     idx = os.path.join(cache, "hp.index")
     text = _clinical_text(con, case_id)
     if not text or not os.path.exists(idx):
         return []
     from acmg.hpo import extract_hpo
-    return extract_hpo(text, idx, case_id=case_id).observed   # LLM-aided, persisted
+    return extract_hpo(text, idx, mode=hpo_mode, case_id=case_id).observed   # default tool_only (local); persisted
 
 
 def _referral_genes(text: str, known_genes) -> set:
@@ -154,10 +160,11 @@ def load_known_genes(con, snv_class: str) -> set:
 
 
 def prioritize_case(con, cid: str, *, prepared: str, snv_class: str, cnv_store: str, cache: str, ped,
-                    gene_moi, hi_genes, ts_genes, known_genes=None):
+                    gene_moi, hi_genes, ts_genes, known_genes=None, hpo_mode: str = privacy.OFFLINE_HPO_MODE):
     """Load one proband's SNV+CNV candidates, derive case metadata + pedigree facts + HPO, and run the fold ->
     (top_df, session, meta). Shared gene sets are passed in (built once by load_gene_sets). One con is reusable
-    across cases (the Monarch ATTACH is idempotent; gene_phenotype is rebuilt per case)."""
+    across cases (the Monarch ATTACH is idempotent; gene_phenotype is rebuilt per case). `hpo_mode` other than
+    tool_only sends the clinical text to an external LLM: callers gate it with privacy.check_external_llm."""
     structure = _structure(ped, cid)
     named_genes = _referral_genes(_clinical_text(con, cid), known_genes)   # clinician-named genes (targeted re-test)
 
@@ -194,7 +201,7 @@ def prioritize_case(con, cid: str, *, prepared: str, snv_class: str, cnv_store: 
         else:
             cnv = None
 
-    hpo = _hpo(con, cid, cache)
+    hpo = _hpo(con, cid, cache, hpo_mode)
     if hpo:                                    # populate gene_phenotype from Monarch for THIS case's HPO
         from acmg import rank
         rank.attach_monarch(con)               # idempotent — safe to call per case
@@ -217,7 +224,9 @@ def main() -> None:
     ap.add_argument("--snv-class", default=".cache/cohort_annotations_classified.parquet")
     ap.add_argument("--cnv-store", default=".cache/cnv_store.parquet")
     ap.add_argument("--out", default=None)
+    privacy.add_privacy_args(ap, pii_input=False)
     a = ap.parse_args()
+    privacy.check_external_llm(a.hpo_mode, a.allow_external_llm)
     con = duckdb.connect()
     pedp = f"{a.prepared}/pedigree_corrected.parquet"
     ped = con.execute(f"SELECT * FROM read_parquet('{pedp}')").df() if os.path.exists(pedp) else pd.DataFrame()
@@ -225,7 +234,7 @@ def main() -> None:
     known = load_known_genes(con, a.snv_class)
     top, _, meta = prioritize_case(con, a.case_id, prepared=a.prepared, snv_class=a.snv_class, cnv_store=a.cnv_store,
                                    cache=a.cache, ped=ped, gene_moi=gene_moi, hi_genes=hi_genes, ts_genes=ts_genes,
-                                   known_genes=known)
+                                   known_genes=known, hpo_mode=a.hpo_mode)
     out = a.out or f"{a.case_id}_top10.csv"
     top.head(10).to_csv(out, index=False)
     print(f"{a.case_id}: structure={meta['structure']}, {meta['n_snv']} SNV + {meta['n_cnv']} CNV candidates, "

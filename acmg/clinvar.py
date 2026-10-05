@@ -12,8 +12,12 @@ chrom-pos-ref-alt lookup. GRCh37-native — same build as the bundle, no liftove
 Download once: https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/variant_summary.txt.gz
 """
 from __future__ import annotations
+from typing import TYPE_CHECKING
 from pathlib import Path
 import duckdb
+
+if TYPE_CHECKING:  # annotations only; pandas is imported lazily where it is used
+    import pandas as pd
 
 _AA3_TO_1 = {
     "Ala": "A", "Arg": "R", "Asn": "N", "Asp": "D", "Cys": "C", "Gln": "Q", "Glu": "E", "Gly": "G",
