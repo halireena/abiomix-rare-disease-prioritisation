@@ -5,6 +5,11 @@ Uses the real challenge bundle + the reference data in .cache/. Bounded to a gen
 budget stays small (production pre-filters by rarity + panel, then annotates the residual novel set).
 
 Run:  BUNDLE=/root/bioconnect/dataset_clinical_curated.parquet python examples/run_case.py CASE0003
+
+Needs (see README "Where to get the data"): the Abiomix challenge bundle (not public, not in this repo),
+`bash scripts/fetch_data.sh` reference data in .cache/, network (Ensembl VEP REST, Monarch KG, the duckhts
+DuckDB extension) and, for the default HPO mode, the `pi` CLI with an LLM provider. Note the default HPO mode
+sends the case's clinical-indication text to that LLM provider.
 """
 import os, sys, duckdb, pandas as pd
 from acmg.clinvar import load_clinvar
@@ -28,6 +33,15 @@ GENE_CURATION = pd.DataFrame([
          lof_mechanism=True, gene_disease_validity="Definitive", source="panel")
     for g in ["SCN1A","STXBP1","SYNGAP1","CDKL5","FOXG1","KCNQ2"]
 ])
+
+# Pre-flight: say what is missing and where to get it, instead of a DuckDB "No files found" traceback.
+_needed = {BUNDLE: "the Abiomix challenge bundle (set BUNDLE=/path/to/file.parquet)"}
+for _f in ("variant_summary.txt.gz", "gnomad_constraint.txt.gz", "gencode.lift37.gtf.gz", "hp.index"):
+    _needed[os.path.join(CACHE, _f)] = "reference data: run `bash scripts/fetch_data.sh` (needs network)"
+_missing = [f"  {os.path.normpath(p)}  <- {how}" for p, how in _needed.items() if not os.path.exists(p)]
+if _missing:
+    sys.exit("run_case.py needs data that is not here yet:\n" + "\n".join(_missing)
+             + "\nFor an offline run with no downloads, use: python examples/demo.py")
 
 con = duckdb.connect()
 print("[1/6] reference tables ...")
