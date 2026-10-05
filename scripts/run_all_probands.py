@@ -6,6 +6,10 @@ is NOT the student-submission dir (never touches /root/bioconnect/*_top10.csv). 
 the pipeline sees only the student dataset + public reference DBs.
 
 Run:  PYTHONPATH=. python3 scripts/run_all_probands.py [--out-dir .cache/top10] [--limit N]
+
+Privacy defaults (acmg.privacy): HPO extraction is `--hpo-mode tool_only` (local FastHPOCR) and nothing is sent
+to an LLM. The LLM HPO modes and the --agent arm send each case's clinical-indication text to an LLM provider via
+the `pi` CLI and need --allow-external-llm.
 """
 from __future__ import annotations
 import argparse
@@ -13,7 +17,8 @@ import os
 import time
 import duckdb
 import pandas as pd
-from scripts.run_proband import load_gene_sets, prioritize_case, load_known_genes
+from scripts.run_proband import load_gene_sets, prioritize_case, load_known_genes, _clinical_text as _case_text
+from acmg import privacy
 
 PREP = "/root/bioconnect/prepared"
 
@@ -28,8 +33,11 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0, help="first N cases (0 = all)")
     ap.add_argument("--cases", default="", help="comma-separated case_ids to run (default: all)")
     ap.add_argument("--agent", action="store_true",
-                    help="AGENT-AUGMENTED arm: drive the CaseSession with the LLM (refine HPO + gated PP4) per case")
+                    help="AGENT-AUGMENTED arm: drive the CaseSession with the LLM (refine HPO + gated PP4) per case; "
+                         "sends clinical text to an external LLM, needs --allow-external-llm")
+    privacy.add_privacy_args(ap, pii_input=False)
     a = ap.parse_args()
+    privacy.check_external_llm(a.hpo_mode, a.allow_external_llm, agent=a.agent)
     os.makedirs(a.out_dir, exist_ok=True)
     con = duckdb.connect()
 
@@ -46,23 +54,16 @@ def main() -> None:
     if a.limit:
         cases = cases[:a.limit]
 
-    def _clinical_text(cid):
-        src = "/root/bioconnect/dataset_clinical_curated.deid.parquet"
-        src = src if os.path.exists(src) else "/root/bioconnect/dataset.parquet"
-        row = con.execute(f"SELECT DISTINCT clinical_indication_text FROM read_parquet('{src}') WHERE student_case_id = ?",
-                          [cid]).fetchone()
-        return row[0] if row and row[0] else ""
-
     rows, t0 = [], time.time()
     for i, cid in enumerate(cases, 1):
         try:
             top, session, meta = prioritize_case(con, cid, prepared=a.prepared, snv_class=a.snv_class,
                                                  cnv_store=a.cnv_store, cache=a.cache, ped=ped,
                                                  gene_moi=gene_moi, hi_genes=hi_genes, ts_genes=ts_genes,
-                                                 known_genes=known)
+                                                 known_genes=known, hpo_mode=a.hpo_mode)
             if a.agent:                       # AGENT arm: LLM refines HPO + proposes gated PP4, deterministically re-folds
                 from acmg.session_agent import agent_review
-                top = agent_review(session, _clinical_text(cid), cr_index=f"{a.cache}/hp.index")
+                top = agent_review(session, _case_text(con, cid), cr_index=f"{a.cache}/hp.index")
             top.head(10).to_csv(f"{a.out_dir}/{cid}_top10.csv", index=False)
             t1 = top.iloc[0] if len(top) else None
             rows.append({"case_id": cid, **meta, "ok": True,

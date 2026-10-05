@@ -4,25 +4,38 @@
 Uses the real challenge bundle + the reference data in .cache/. Bounded to a gene panel so the VEP-REST
 budget stays small (production pre-filters by rarity + panel, then annotates the residual novel set).
 
-Run:  BUNDLE=/root/bioconnect/dataset_clinical_curated.parquet python examples/run_case.py CASE0003
+Run:  python examples/run_case.py CASE0003 [--bundle /root/bioconnect/dataset.parquet]
 
 Needs (see README "Where to get the data"): the Abiomix challenge bundle (not public, not in this repo),
-`bash scripts/fetch_data.sh` reference data in .cache/, network (Ensembl VEP REST, Monarch KG, the duckhts
-DuckDB extension) and, for the default HPO mode, the `pi` CLI with an LLM provider. Note the default HPO mode
-sends the case's clinical-indication text to that LLM provider.
+`bash scripts/fetch_data.sh` reference data in .cache/ and network (Ensembl VEP REST, Monarch KG, the duckhts
+DuckDB extension).
+
+Privacy defaults (acmg.privacy):
+  - reads the DE-IDENTIFIED `dataset.parquet` (or --bundle / $BUNDLE). The raw curated
+    `dataset_clinical_curated.parquet` carries PII and is refused unless --allow-pii-input is passed.
+  - HPO extraction is `--hpo-mode tool_only` (local FastHPOCR, nothing leaves the machine). The LLM modes
+    (augment_select, candidates_model, model_only) send the clinical-indication text to an LLM provider via the
+    `pi` CLI and need --allow-external-llm.
 """
-import os, sys, duckdb, pandas as pd
+import argparse, os, sys, duckdb, pandas as pd
 from acmg.clinvar import load_clinvar
 from acmg.constraint import load_constraint
 from acmg.nmd import load_exons
 from acmg.annotate import annotate_hybrid
 from acmg.kernel import classify
 from acmg.hpo import extract_hpo
-from acmg import rank, decision
+from acmg import rank, decision, privacy
 
 CACHE = os.path.join(os.path.dirname(__file__), "..", ".cache")
-BUNDLE = os.environ.get("BUNDLE", "/root/bioconnect/dataset_clinical_curated.parquet")
-CASE = sys.argv[1] if len(sys.argv) > 1 else "CASE0003"
+_ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+_ap.add_argument("case", nargs="?", default="CASE0003")
+_ap.add_argument("--bundle", default=os.environ.get("BUNDLE", privacy.DEID_BUNDLE),
+                 help="challenge bundle parquet (default: $BUNDLE or the de-identified dataset.parquet)")
+privacy.add_privacy_args(_ap)
+ARGS = _ap.parse_args()
+CASE = ARGS.case
+BUNDLE = privacy.check_bundle(ARGS.bundle, ARGS.allow_pii_input)
+privacy.check_external_llm(ARGS.hpo_mode, ARGS.allow_external_llm, allow_pii_input=ARGS.allow_pii_input)
 
 # a neurodevelopmental / epilepsy gene panel (the clinical pre-filter for this proband)
 PANEL = ["SCN1A","SCN2A","SCN8A","STXBP1","KCNQ2","KCNT1","CDKL5","MECP2","FOXG1","SYNGAP1","GRIN2B",
@@ -35,7 +48,7 @@ GENE_CURATION = pd.DataFrame([
 ])
 
 # Pre-flight: say what is missing and where to get it, instead of a DuckDB "No files found" traceback.
-_needed = {BUNDLE: "the Abiomix challenge bundle (set BUNDLE=/path/to/file.parquet)"}
+_needed = {BUNDLE: "the Abiomix challenge bundle (pass --bundle /path/to/dataset.parquet)"}
 for _f in ("variant_summary.txt.gz", "gnomad_constraint.txt.gz", "gencode.lift37.gtf.gz", "hp.index"):
     _needed[os.path.join(CACHE, _f)] = "reference data: run `bash scripts/fetch_data.sh` (needs network)"
 _missing = [f"  {os.path.normpath(p)}  <- {how}" for p, how in _needed.items() if not os.path.exists(p)]
@@ -75,7 +88,7 @@ cls = cls[cls["acmg_class"] != "Not evaluated (non-SNV/indel — see Riggs 2020)
 
 print("[5/6] HPO from clinical text + phenotype x genotype rank (Monarch) ...")
 txt = con.execute(f"SELECT DISTINCT clinical_indication_text FROM read_parquet('{BUNDLE}') WHERE student_case_id='{CASE}'").fetchone()[0]
-hpo = extract_hpo(txt or "", f"{CACHE}/hp.index", case_id=CASE)  # default augment_select: LLM augment + FastHPOCR ground + LLM select (spark); persisted
+hpo = extract_hpo(txt or "", f"{CACHE}/hp.index", mode=ARGS.hpo_mode, case_id=CASE)  # default tool_only (local); persisted
 print(f"      observed HPO: {hpo.observed}  excluded: {hpo.excluded}  family: {hpo.family_scope}")
 try:
     rank.attach_monarch(con); rank.monarch_gene_phenotype(con, hpo.observed)

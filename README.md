@@ -113,7 +113,7 @@ python -m pytest -q      # ~80 tests in a few seconds; ~10 skip without optional
 | `ruff check .` | Yes | `pip install ruff` |
 | `bash scripts/fetch_data.sh` | No | Network; downloads public reference data (about 1 GB) into `.cache/` (see [Where to get the data](#where-to-get-the-data)) |
 | `python scripts/build_hpo_index.py` | Yes, after download | `.cache/hp.obo` plus `pip install FastHPOCR pronto`; about 15 minutes, writes a ~140 MB `.cache/hp.index` |
-| `python examples/run_case.py CASE0003` | No | The Abiomix challenge bundle (not public), `.cache/` reference data, network (Ensembl VEP REST, Monarch KG, `duckhts`), and the `pi` CLI with an LLM provider for the default HPO mode |
+| `python examples/run_case.py CASE0003` | No | The Abiomix challenge bundle (not public), `.cache/` reference data, network (Ensembl VEP REST, Monarch KG, `duckhts`). HPO extraction is local by default; the `pi` CLI is needed only with `--hpo-mode <llm mode> --allow-external-llm` (see [Privacy defaults](#privacy-defaults)) |
 | `python examples/literature_arm.py` | No | Network (Europe PMC, MARRVEL, DECIPHER, LitVar2) and the `pi` CLI |
 | `PYTHONPATH=. python scripts/<name>.py --help` | Yes | Each driver documents its inputs; most need the challenge bundle and `.cache/` data. Run from the repository root with `PYTHONPATH=.` (several import `scripts.*`) |
 
@@ -214,8 +214,26 @@ Phenotypes were extracted from clinical notes and normalised to Human Phenotype 
 
 The value of the validation layer is illustrated by CASE0004, where the clinical notes described findings that belonged to the patient's relatives rather than the proband. The validation layer correctly identified these as family-history context rather than proband-intrinsic phenotype and returned zero proband terms, preventing a false lead downstream. A comparison of rule-based versus language-model-assisted extraction is included as part of the validation work.
 
-`acmg.hpo.extract_hpo(..., mode="tool_only")` is the deterministic, no-LLM path. The default mode calls an
-LLM through the `pi` CLI and so sends the note text to that provider; only do that with de-identified text.
+`acmg.hpo.extract_hpo(..., mode="tool_only")` is the deterministic, no-LLM path. The library function's default
+mode calls an LLM through the `pi` CLI and so sends the note text to that provider; only do that with
+de-identified text.
+
+#### Privacy defaults
+
+The per-case drivers (`examples/run_case.py`, `scripts/run_proband.py`, `scripts/run_all_probands.py`) are
+safe by default (logic in `acmg/privacy.py`):
+
+- **Input.** They read the de-identified `dataset.parquet`. `run_case.py` refuses the raw curated
+  `dataset_clinical_curated.parquet`, which carries PII in `clinical_indication_text`, unless you pass
+  `--allow-pii-input`. The variant calls are identical in both files.
+- **External LLM.** HPO extraction defaults to `--hpo-mode tool_only` (local FastHPOCR, nothing leaves the
+  machine). The LLM modes (`augment_select`, `candidates_model`, `model_only`) and the `run_all_probands.py
+  --agent` arm send the clinical-indication text to an LLM provider through `pi`, and need
+  `--allow-external-llm`. That flag cannot be combined with `--allow-pii-input`.
+- A one-line warning is printed to stderr whenever either opt-in is used.
+
+For example, to reproduce the LLM-assisted HPO extraction on the de-identified bundle:
+`python examples/run_case.py CASE0003 --hpo-mode augment_select --allow-external-llm`.
 
 ### Stage 3 - Variant annotation
 
@@ -446,7 +464,9 @@ request, and checks that `requirements.lock` installs.
 | `SKIPPED ... FastHPOCR hp.index not built` | Expected until you build the index: download `hp.obo`, `pip install FastHPOCR pronto`, `python scripts/build_hpo_index.py`. |
 | `No module named 'pronto'` while building `hp.index` | FastHPOCR's indexer needs it but does not declare it: `pip install pronto`. |
 | `run_case.py needs data that is not here yet` | It needs the challenge bundle and `.cache/` reference data; the message lists each missing file. For an offline run use `examples/demo.py`. |
-| `pi CLI not found on PATH` | The literature arm and the default HPO mode call an LLM through the `pi` CLI. Install and configure it, pass your own `prompt -> text` callable as `llm=`, or use `extract_hpo(..., mode="tool_only")`. |
+| `pi CLI not found on PATH` | The literature arm, the LLM HPO modes and the `--agent` arm call an LLM through the `pi` CLI. Install and configure it, pass your own `prompt -> text` callable as `llm=`, or keep the drivers' default `--hpo-mode tool_only`. |
+| `refusing to read ...dataset_clinical_curated.parquet` | That file carries raw PII. Use the de-identified `dataset.parquet` (`--bundle /path/to/dataset.parquet`); pass `--allow-pii-input` only if you really mean to read it. |
+| `... sends the case's clinical-indication text to an external LLM provider` | An LLM HPO mode or `--agent` was requested without consent. Add `--allow-external-llm` (de-identified text only) or drop back to `--hpo-mode tool_only`. |
 | `(Monarch unavailable: ...)`, phenotype score 0 | The Monarch KG is attached over HTTPS; check network access to `data.monarchinitiative.org`. |
 | `vep_to_annotations: input has no column(s) ['POS']` | Your VEP table names coordinates differently. Pass `cols={'chrom': ..., 'pos': ..., 'ref': ..., 'alt': ...}`. |
 | PVS1 never fires | PVS1 needs both gene curation saying LoF is a disease mechanism (`gene_curation=`, for example from `acmg.clingen`) and an NMD status (`nmd_escaping` 0 or 1). Without either it abstains by design. |
