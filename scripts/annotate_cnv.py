@@ -9,7 +9,6 @@ Run:  PYTHONPATH=. python3 scripts/annotate_cnv.py --parquet /root/bioconnect/pr
 """
 from __future__ import annotations
 import argparse
-from pathlib import Path
 import duckdb
 import pandas as pd
 from acmg.cnv import classify_cnv

@@ -30,7 +30,7 @@ def render(ctx: dict) -> str:
     )
 
 
-print(f"\n[2/3] pi proposes (recorded + gated) ...")
+print("\n[2/3] pi proposes (recorded + gated) ...")
 if not pi.available():
     raise SystemExit("pi CLI not found; wire any prompt->text callable into agent.propose instead")
 # full persistence: every run (context, prompt, model, response, digest) + the decision are durably logged
@@ -40,7 +40,7 @@ proposal = agent.propose(context, llm=pi.as_llm(provider="openai-codex", model="
 print(f"      status: {proposal['status']}   digest: {proposal['digest'][:23]}…")
 print("      model proposal:\n" + "\n".join("        " + l for l in proposal["response"].splitlines()[:12]))
 
-print(f"\n[3/3] a curator approves this exact digest (a separate, attested decision) ...")
+print("\n[3/3] a curator approves this exact digest (a separate, attested decision) ...")
 approved = agent.approve(proposal, approver="curator", ledger=ledger)
 print(f"      status: {approved['status']}  approved_by: {approved['approved_by']}  "
       f"digest-bound: {approved['approved_digest'] == proposal['digest']}")

@@ -30,7 +30,7 @@ GENE_CURATION = pd.DataFrame([
 ])
 
 con = duckdb.connect()
-print(f"[1/6] reference tables ...")
+print("[1/6] reference tables ...")
 load_clinvar(con, f"{CACHE}/variant_summary.txt.gz", cache_parquet=f"{CACHE}/clinvar_prot.parquet")
 load_constraint(con, f"{CACHE}/gnomad_constraint.txt.gz")
 load_exons(con, f"{CACHE}/gencode.lift37.gtf.gz")
@@ -51,15 +51,15 @@ cands = con.execute(f"""
 print(f"      {len(cands)} candidate variants in panel genes")
 vcf = [f"{r.chrom} {r.pos} . {r.ref_a} {r.alt_a} . . ." for r in cands.itertuples()]
 
-print(f"[3/6] hybrid annotate (VEP-REST + local ClinVar PS1/PM5 + NMD + gnomAD constraint) ...")
+print("[3/6] hybrid annotate (VEP-REST + local ClinVar PS1/PM5 + NMD + gnomAD constraint) ...")
 ann = annotate_hybrid(con, vcf)
 print(f"      annotated {len(ann)}; coding: {ann['consequence'].notna().sum()}")
 
-print(f"[4/6] ACMG classify ...")
+print("[4/6] ACMG classify ...")
 cls = classify(ann, con=duckdb.connect(), gene_curation=GENE_CURATION)
 cls = cls[cls["acmg_class"] != "Not evaluated (non-SNV/indel — see Riggs 2020)"]
 
-print(f"[5/6] HPO from clinical text + phenotype x genotype rank (Monarch) ...")
+print("[5/6] HPO from clinical text + phenotype x genotype rank (Monarch) ...")
 txt = con.execute(f"SELECT DISTINCT clinical_indication_text FROM read_parquet('{BUNDLE}') WHERE student_case_id='{CASE}'").fetchone()[0]
 hpo = extract_hpo(txt or "", f"{CACHE}/hp.index", case_id=CASE)  # default augment_select: LLM augment + FastHPOCR ground + LLM select (spark); persisted
 print(f"      observed HPO: {hpo.observed}  excluded: {hpo.excluded}  family: {hpo.family_scope}")
@@ -70,7 +70,7 @@ except Exception as e:
     print(f"      (Monarch unavailable: {e}); phenotype = 0"); pheno = pd.DataFrame(columns=["gene","phenotype_score"])
 ranked = rank.rerank(cls, pheno)
 
-print(f"[6/6] GO decision\n")
+print("[6/6] GO decision\n")
 go = decision.case_decision(ranked, case_id=CASE)
 cols = ["gene","variant_key","acmg_class","total_points","phenotype_norm","combined_score","decision"]
 print(ranked.merge(pd.DataFrame(go["variants"])[["variant_key","decision"]], on="variant_key", how="left")[cols].head(10).to_string(index=False))

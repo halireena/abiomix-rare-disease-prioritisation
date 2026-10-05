@@ -14,9 +14,13 @@ Returns the kernel's `annotations` columns plus protein_pos/alt_aa1 for the Clin
 (acmg.clinvar). GRCh37-native — no liftover.
 """
 from __future__ import annotations
+from typing import TYPE_CHECKING
 import time
 import requests
-from .vep_map import SO_TO_KERNEL, variant_kind, REQUIRED_COLS
+from .vep_map import SO_TO_KERNEL, variant_kind
+
+if TYPE_CHECKING:  # annotations only; pandas is imported lazily where it is used
+    import pandas as pd
 
 GRCH37 = "https://grch37.rest.ensembl.org"
 MAX_POST = 200          # Ensembl: max variants per POST /vep/human/region

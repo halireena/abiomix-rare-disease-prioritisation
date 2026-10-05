@@ -12,7 +12,6 @@ Pedigree by `ingest_pedigree`:
   - the curated relationship fields  : delegated to acmg.family.build_pedigree over `sample_call`.
 """
 from __future__ import annotations
-import os
 import duckdb
 
 # Canonical per-call columns the rest of the package relies on. KEEP THIS STABLE.
