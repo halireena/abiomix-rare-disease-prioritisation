@@ -65,6 +65,18 @@ def test_vep_to_annotations_custom_column_map():
     assert pd.isna(row.revel) and pd.isna(row.spliceai)   # absent columns -> None, not a KeyError
 
 
+def test_vep_to_annotations_missing_coordinates_says_which_column():
+    # a VEP table whose position column is named differently: name it and point at `cols=`, not int(None)
+    vep_df = pd.DataFrame([dict(CHROM="1", Start=5, REF="C", ALT="T", SYMBOL="XYZ")])
+    try:
+        vep_to_annotations(vep_df)
+    except ValueError as e:
+        assert "POS" in str(e) and "cols=" in str(e)
+    else:
+        raise AssertionError("expected a ValueError naming the missing column")
+    assert vep_to_annotations(pd.DataFrame()).empty   # an empty input is still just an empty frame
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
